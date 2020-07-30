@@ -1,0 +1,36 @@
+{
+  "name": "as-glue",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "asbuild:debug": "asc assembly/index.ts --runtime full --transform ./glue-transform.ts --target debug -b build/untouched.wasm",
+    "asbuild:release": "asc assembly/index.ts --runtime full --transform ./glue-transform.ts --target release",
+    "asbuild": "npm run asbuild:debug && npm run asbuild:release",
+    "glue-es6-to-cjs": "babel --plugins @babel/plugin-transform-modules-commonjs ./glue.js -o glue.cjs.js",
+    "make": "npm run asbuild:debug && npm run glue-es6-to-cjs && node index.js",
+    "dev": "onchange ./index.js ./glue-transform.ts ./assembly/index.ts -- npm run make"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@assemblyscript/loader": "latest"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.10.5",
+    "@babel/core": "^7.10.5",
+    "@babel/generator": "^7.10.5",
+    "@babel/plugin-transform-modules-commonjs": "^7.10.4",
+    "@babel/types": "^7.10.5",
+    "@types/node": "^14.0.26",
+    "assemblyscript": "latest",
+    "prettier": "^2.0.5",
+    "ts-node": "^8.10.2",
+    "typescript": "^3.9.7"
+  },
+  "prettier": {
+    "trailingComma": "es5",
+    "semi": false,
+    "singleQuote": true
+  }
+}

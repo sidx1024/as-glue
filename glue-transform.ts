@@ -58,6 +58,119 @@ const ASTHelper = {
   declareFunction: (name, parameters) => {},
 }
 
+const a = ASTHelper
+
+const isArrayType = (type) => /^Array/.test(type)
+const isInternalType = (type) => /^~lib/.test(type)
+
+const getInternalType = (type) => {
+  return type.slice(type.lastIndexOf('/') + 1, -1)
+}
+
+const getArrayType = (type) => {
+  const elementType = type.slice(6, -1)
+  if (isInternalType(elementType)) {
+    return getInternalType(elementType)
+  } else if (isArrayType(elementType)) {
+    return getArrayType(elementType)
+  }
+}
+
+const getReferenceTypeHandler = (type) => {
+  if (type === 'String') {
+    return {
+      allocateArgument: (arg, ref) => {
+        const retain = a.call('__retain', [
+          a.call('__allocString', [t.identifier(arg)]),
+        ])
+        if (ref) {
+          return a.declare(ref, retain)
+        }
+        return retain
+      },
+      call: (fn, args, ref) => {
+        return a.declare(
+          ref,
+          a.dotCall(
+            'exports',
+            fn,
+            args.map((arg) => t.identifier(arg))
+          )
+        )
+      },
+      getValue: (ref, valueRef) => {
+        return a.declare(valueRef, a.call('__getString', [t.identifier(ref)]))
+      },
+      release: (ref) => {
+        if (ref) {
+          return t.expressionStatement(a.call('__release', [t.identifier(ref)]))
+        }
+      },
+    }
+  } else if (/Array$/.test(type)) {
+    return {
+      allocateArgument: (arg, ref) => {
+        const id = `${type}_ID`
+        const idRef = t.memberExpression(
+          t.identifier('exports'),
+          t.identifier(id)
+        )
+        const retain = a.call('__retain', [
+          a.call('__allocArray', [idRef, t.identifier(arg)]),
+        ])
+        if (ref) {
+          return a.declare(ref, retain)
+        }
+        return retain
+      },
+      call: (fn, args, ref) => {
+        return a.declare(
+          ref,
+          a.dotCall(
+            'exports',
+            fn,
+            args.map((arg) => t.identifier(arg))
+          )
+        )
+      },
+      getValue: (ref, valueRef) => {
+        return a.declare(valueRef, a.call('__getArray', [t.identifier(ref)]))
+      },
+      release: (ref) => {
+        if (ref) {
+          return t.expressionStatement(a.call('__release', [t.identifier(ref)]))
+        }
+      },
+    }
+  } else if (isArrayType(type)) {
+    let arrayType = getArrayType(type)
+    if (!arrayType) {
+      throw `could not handle array type: ${type}`
+    }
+    return {
+      allocateArgument: (arg, ref) => {
+        const retain = a.dotCall(arg, 'map', [
+          t.arrowFunctionExpression(
+            [t.identifier('string')],
+            getReferenceTypeHandler(arrayType).allocateArgument(arg)
+          ),
+        ])
+        if (ref) {
+          return a.declare(ref, retain)
+        }
+        return retain
+      },
+      release: (ref) => {
+        if (ref) {
+          return t.expressionStatement(a.call('__release', [t.identifier(ref)]))
+        }
+      },
+    }
+  } else {
+    debugger
+  }
+}
+
 class Composition {
   private name: string
   private parameters: any
@@ -104,11 +217,11 @@ class Composition {
   }
 
   getReturnName() {
-    return 'c'
+    return 'retValue'
   }
 
   getReturnPointerName() {
-    return this.getReturnName() + 'Ptr'
+    return 'retPtr'
   }
 
   getReturnType() {
@@ -116,29 +229,25 @@ class Composition {
   }
 
   handleParameter(i) {
-    const pointerName = this.getParameterPointerName(i)
-    const vParameterName = this.getParameterName(i)
-    const parameterType = this.getParameterType(i)
-    const a = ASTHelper
+    const ptr = this.getParameterPointerName(i)
+    const arg = this.getParameterName(i)
+    const type = this.getParameterType(i)
 
-    let alloc, release, param
-    switch (parameterType) {
-      case 'string': {
-        param = t.identifier(vParameterName)
-        alloc = a.declare(
-          pointerName,
-          a.call('__retain', [a.call('__allocString', [param])])
-        )
-        release = t.expressionStatement(
-          a.call('__release', [t.identifier(pointerName)])
-        )
-        break
+    let alloc, release
+
+    const handler = getReferenceTypeHandler(type)
+    if (handler) {
+      if (handler.allocateArgument) {
+        alloc = handler.allocateArgument(arg, ptr)
+        if (handler.release) {
+          release = handler.release(ptr)
+        }
       }
-      default:
-        throw `could not handle parameter ${vParameterName}:${parameterType}`
+    } else {
+      throw `could not handle parameter ${arg}:${type}`
     }
 
-    this.sections.parameters.push(param)
+    this.sections.parameters.push(t.identifier(arg))
     this.sections.allocations.push(alloc)
     if (release) {
       this.sections.releases.push(release)
@@ -146,55 +255,43 @@ class Composition {
   }
 
   handleCall() {
-    const functionName = this.getFunctionName()
-    const vParameterName = this.getReturnPointerName()
-    const parameters = this.parameters.map((_, i) =>
-      this.getParameterPointerName(i)
-    )
-    const a = ASTHelper
+    const fn = this.getFunctionName()
+    const ref = this.getReturnPointerName()
+    const args = this.parameters.map((_, i) => this.getParameterPointerName(i))
+    const type = this.getReturnType()
 
-    let alloc
+    let call
 
-    alloc = a.declare(
-      vParameterName,
-      a.dotCall(
-        'exports',
-        functionName,
-        parameters.map((p) => t.identifier(p))
-      )
-    )
+    const handler = getReferenceTypeHandler(type)
+    if (handler) {
+      if (handler.call) {
+        call = handler.call(fn, args, ref)
+      }
+    } else {
+      throw `could not handle call ${type}`
+    }
 
-    this.sections.allocations.push(alloc)
+    this.sections.allocations.push(call)
   }
 
   handleReturn() {
-    const pointerName = this.getReturnPointerName()
-    const vParameterName = this.getReturnName()
-    const parameterType = this.getReturnType()
+    const ref = this.getReturnPointerName()
+    const type = this.getReturnType()
+    const valueRef = this.getReturnName()
 
-    const a = ASTHelper
+    let call, ret
 
-    let alloc, release, ret
-    switch (parameterType) {
-      case 'string': {
-        alloc = a.declare(
-          vParameterName,
-          a.call('__getString', [t.identifier(pointerName)])
-        )
-        release = t.expressionStatement(
-          a.call('__release', [t.identifier(pointerName)])
-        )
-        ret = t.returnStatement(t.identifier(vParameterName))
-        break
+    const handler = getReferenceTypeHandler(type)
+    if (handler) {
+      if (handler.getValue) {
+        call = handler.getValue(ref, valueRef)
+        ret = t.returnStatement(t.identifier(valueRef))
       }
-      default:
-        throw `could not handle parameter ${vParameterName}:${parameterType}`
+    } else {
+      throw `could not handle return ${type}`
     }
 
-    this.sections.allocations.push(alloc)
-    if (release) {
-      this.sections.releases.push(release)
-    }
+    this.sections.allocations.push(call)
     this.sections.returns.push(ret)
   }
 
@@ -308,7 +405,7 @@ class GlueBuilder extends ExportsWalker {
         return 'u64'
       case TypeKind.USIZE:
         if (type.classReference) {
-          return type.classReference.name.toLowerCase()
+          return type.classReference.name
         }
         return 'usize'
       // ^ TODO: class types

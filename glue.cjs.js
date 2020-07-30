@@ -4,7 +4,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.default = _default;
-exports.concat = concat;
+exports.joinStrings = joinStrings;
 
 let __allocString, __allocArray, __getString, __getArray, __retain, __release, _exports2;
 
@@ -18,20 +18,14 @@ function _default(_exports) {
   _exports2 = _exports;
 }
 
-function concat(a, b) {
-  const aPtr = __retain(__allocString(a));
+function joinStrings(arr) {
+  const arrPtr = arr.map(string => __retain(__allocString(arr)));
 
-  const bPtr = __retain(__allocString(b));
+  const retPtr = _exports2.joinStrings(arrPtr);
 
-  const cPtr = _exports2.concat(aPtr, bPtr);
+  const retValue = __getString(retPtr);
 
-  const c = __getString(cPtr);
+  __release(arrPtr);
 
-  __release(aPtr);
-
-  __release(bPtr);
-
-  __release(cPtr);
-
-  return c;
+  return retValue;
 }

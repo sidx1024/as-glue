@@ -10,20 +10,13 @@ export default function(_exports) {
   exports = _exports
 }
 
-export function concat(a, b) {
-  const aPtr = __retain(__allocString(a));
+export function joinStrings(arr) {
+  const arrPtr = arr.map(string => __retain(__allocString(arr)));
+  const retPtr = exports.joinStrings(arrPtr);
 
-  const bPtr = __retain(__allocString(b));
+  const retValue = __getString(retPtr);
 
-  const cPtr = exports.concat(aPtr, bPtr);
+  __release(arrPtr);
 
-  const c = __getString(cPtr);
-
-  __release(aPtr);
-
-  __release(bPtr);
-
-  __release(cPtr);
-
-  return c;
+  return retValue;
 }
